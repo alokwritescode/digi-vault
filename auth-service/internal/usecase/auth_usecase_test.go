@@ -401,9 +401,14 @@ func TestLogout_Success(t *testing.T) {
 	ur, tr, os := &MockUserRepository{}, &MockTokenRepository{}, &MockOTPStore{}
 	uc := testUsecase(t, ur, tr, os)
 
-	tr.On("Delete", mock.Anything, "some-jti").Return(nil)
+	cfg := testConfig()
+	accessExpiry, _ := time.ParseDuration(cfg.JWTAccessExpiry)
+	accessTok, _ := jwt.GenerateAccessToken(42, cfg.JWTAccessSecret, accessExpiry)
+	claims, _ := jwt.ParseToken(accessTok, cfg.JWTAccessSecret)
 
-	assert.NoError(t, uc.Logout(context.Background(), "some-jti"))
+	tr.On("Delete", mock.Anything, claims.JTI).Return(nil)
+
+	assert.NoError(t, uc.Logout(context.Background(), accessTok))
 	tr.AssertExpectations(t)
 }
 
@@ -411,9 +416,22 @@ func TestLogout_RepoError_Propagates(t *testing.T) {
 	ur, tr, os := &MockUserRepository{}, &MockTokenRepository{}, &MockOTPStore{}
 	uc := testUsecase(t, ur, tr, os)
 
-	tr.On("Delete", mock.Anything, "some-jti").Return(apperrors.ErrInternalServer)
+	cfg := testConfig()
+	accessExpiry, _ := time.ParseDuration(cfg.JWTAccessExpiry)
+	accessTok, _ := jwt.GenerateAccessToken(42, cfg.JWTAccessSecret, accessExpiry)
+	claims, _ := jwt.ParseToken(accessTok, cfg.JWTAccessSecret)
 
-	err := uc.Logout(context.Background(), "some-jti")
+	tr.On("Delete", mock.Anything, claims.JTI).Return(apperrors.ErrInternalServer)
+
+	err := uc.Logout(context.Background(), accessTok)
 	assert.Error(t, err)
 	tr.AssertExpectations(t)
+}
+
+func TestLogout_InvalidToken_ReturnsErrInvalidToken(t *testing.T) {
+	ur, tr, os := &MockUserRepository{}, &MockTokenRepository{}, &MockOTPStore{}
+	uc := testUsecase(t, ur, tr, os)
+
+	err := uc.Logout(context.Background(), "not.a.valid.jwt")
+	assert.ErrorIs(t, err, apperrors.ErrInvalidToken)
 }

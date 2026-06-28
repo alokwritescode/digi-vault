@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 
@@ -39,7 +40,7 @@ type AuthUsecase interface {
 	VerifyOTP(ctx context.Context, phone, otp string) error
 	Login(ctx context.Context, phone, password string) (*TokenPair, error)
 	Refresh(ctx context.Context, refreshToken string) (*TokenPair, error)
-	Logout(ctx context.Context, jti string) error
+	Logout(ctx context.Context, accessToken string) error
 }
 
 type authUsecase struct {
@@ -187,30 +188,33 @@ func (u *authUsecase) Refresh(ctx context.Context, refreshToken string) (*TokenP
 	return u.issueTokenPair(ctx, claims.UserID)
 }
 
-func (u *authUsecase) Logout(ctx context.Context, jti string) error {
+func (u *authUsecase) Logout(ctx context.Context, accessToken string) error {
 	u.logger.WithContext(ctx).Info("usecase: Logout")
-	return u.tokenRepo.Delete(ctx, jti)
+	claims, err := jwt.ParseToken(accessToken, u.jwtAccessSecret)
+	if err != nil {
+		return apperrors.ErrInvalidToken
+	}
+	return u.tokenRepo.Delete(ctx, claims.JTI)
 }
 
-// issueTokenPair generates a fresh access+refresh token pair and stores the
-// refresh token in Redis.
+// issueTokenPair generates a fresh access+refresh token pair with a shared JTI.
+// Sharing the JTI means Logout can identify the refresh token using only the
+// access token's claims, matching the flow defined in PRODUCT.md.
 func (u *authUsecase) issueTokenPair(ctx context.Context, userID uint64) (*TokenPair, error) {
-	accessToken, err := jwt.GenerateAccessToken(userID, u.jwtAccessSecret, u.jwtAccessExpiry)
+	pairJTI := uuid.NewString()
+
+	accessToken, err := jwt.GenerateTokenWithJTI(pairJTI, userID, u.jwtAccessSecret, u.jwtAccessExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("issue tokens: access: %w", err)
 	}
-	refreshToken, err := jwt.GenerateRefreshToken(userID, u.jwtRefreshSecret, u.jwtRefreshExpiry)
+	refreshToken, err := jwt.GenerateTokenWithJTI(pairJTI, userID, u.jwtRefreshSecret, u.jwtRefreshExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("issue tokens: refresh: %w", err)
 	}
-	claims, err := jwt.ParseToken(refreshToken, u.jwtRefreshSecret)
-	if err != nil {
-		return nil, fmt.Errorf("issue tokens: parse refresh: %w", err)
-	}
 	rt := &domain.RefreshToken{
-		JTI:       claims.JTI,
+		JTI:       pairJTI,
 		UserID:    userID,
-		ExpiresAt: claims.ExpiresAt.Time,
+		ExpiresAt: time.Now().Add(u.jwtRefreshExpiry),
 	}
 	if err := u.tokenRepo.Store(ctx, rt); err != nil {
 		return nil, err
