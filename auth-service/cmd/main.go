@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,14 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
 	"github.com/alokwritescode/digi-vault/auth-service/config"
 	"github.com/alokwritescode/digi-vault/auth-service/internal/domain"
 	"github.com/alokwritescode/digi-vault/auth-service/internal/handler"
+	authgrpc "github.com/alokwritescode/digi-vault/auth-service/internal/grpc"
 	"github.com/alokwritescode/digi-vault/auth-service/internal/repository"
 	"github.com/alokwritescode/digi-vault/auth-service/internal/usecase"
+	pb "github.com/alokwritescode/digi-vault/proto/auth"
 )
 
 func main() {
@@ -52,6 +56,7 @@ func main() {
 		log.WithError(err).Fatal("failed to init usecase")
 	}
 
+	// ─── HTTP server ─────────────────────────────────────────────────────────
 	h := handler.NewAuthHandler(uc)
 
 	r := gin.New()
@@ -67,28 +72,48 @@ func main() {
 		auth.POST("/refresh", h.Refresh)
 	}
 
-	srv := &http.Server{
+	httpSrv := &http.Server{
 		Addr:    ":" + cfg.AppPort,
 		Handler: r,
 	}
 
 	go func() {
-		log.WithField("port", cfg.AppPort).Info("auth-service starting")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.WithError(err).Fatal("server error")
+		log.WithField("port", cfg.AppPort).Info("HTTP server starting")
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.WithError(err).Fatal("HTTP server error")
 		}
 	}()
 
+	// ─── gRPC server ─────────────────────────────────────────────────────────
+	grpcSrv := grpc.NewServer()
+	pb.RegisterAuthServiceServer(grpcSrv, authgrpc.NewAuthServer(userRepo, cfg.JWTAccessSecret))
+
+	lis, err := net.Listen("tcp", ":"+cfg.GRPCPort)
+	if err != nil {
+		log.WithError(err).Fatal("failed to bind gRPC port")
+	}
+
+	go func() {
+		log.WithField("port", cfg.GRPCPort).Info("gRPC server starting")
+		if err := grpcSrv.Serve(lis); err != nil {
+			log.WithError(err).Fatal("gRPC server error")
+		}
+	}()
+
+	// ─── Graceful shutdown ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Info("shutting down...")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.WithError(err).Fatal("forced shutdown")
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		log.WithError(err).Fatal("HTTP forced shutdown")
 	}
+
+	grpcSrv.GracefulStop()
 	log.Info("auth-service stopped")
 }
 

@@ -24,6 +24,7 @@ type Config struct {
 	JWTRefreshExpiry string
 	OTPTtl     string
 	BcryptCost int
+	GRPCPort   string
 }
 
 // Load reads configuration from environment variables (and an optional .env in CWD).
@@ -56,6 +57,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("JWT_REFRESH_EXPIRY", "168h")
 	v.SetDefault("OTP_TTL", "5m")
 	v.SetDefault("BCRYPT_COST", 12)
+	v.SetDefault("GRPC_PORT", "9091")
 }
 
 func build(v *viper.Viper) (*Config, error) {
@@ -86,5 +88,6 @@ func build(v *viper.Viper) (*Config, error) {
 		JWTRefreshExpiry: v.GetString("JWT_REFRESH_EXPIRY"),
 		OTPTtl:           v.GetString("OTP_TTL"),
 		BcryptCost:       v.GetInt("BCRYPT_COST"),
+		GRPCPort:         v.GetString("GRPC_PORT"),
 	}, nil
 }
