@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -20,6 +21,7 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 	FindByID(ctx context.Context, id uint64) (*domain.User, error)
 	UpdateIsActive(ctx context.Context, userID uint64, isActive bool) error
+	SoftDelete(ctx context.Context, userID uint64) error
 }
 
 type gormUserRepository struct {
@@ -66,6 +68,18 @@ func (r *gormUserRepository) UpdateIsActive(ctx context.Context, userID uint64, 
 			Model(&domain.User{}).
 			Where("id = ?", userID).
 			Update("is_active", isActive).Error,
+	)
+}
+
+// SoftDelete sets deleted_at to now via a manual UPDATE.
+// We use Update() explicitly because domain.User.DeletedAt is *time.Time (not gorm.DeletedAt),
+// so db.Delete() would issue a hard DELETE instead of setting the timestamp.
+func (r *gormUserRepository) SoftDelete(ctx context.Context, userID uint64) error {
+	return translateUserError(
+		r.db.WithContext(ctx).
+			Model(&domain.User{}).
+			Where("id = ?", userID).
+			Update("deleted_at", time.Now()).Error,
 	)
 }
 

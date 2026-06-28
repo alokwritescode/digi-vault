@@ -181,6 +181,34 @@ func TestFindByID_NotFound_ReturnsErrUserNotFound(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+// ─── SoftDelete ──────────────────────────────────────────────────────────────
+
+func TestSoftDelete_Success(t *testing.T) {
+	gormDB, mock := newTestUserDB(t)
+	repo := repository.NewUserRepository(gormDB)
+
+	// GORM soft delete issues UPDATE users SET deleted_at=? WHERE id=?
+	mock.ExpectExec(`UPDATE .users.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.SoftDelete(context.Background(), 1)
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSoftDelete_DBError(t *testing.T) {
+	gormDB, mock := newTestUserDB(t)
+	repo := repository.NewUserRepository(gormDB)
+
+	mock.ExpectExec(`UPDATE .users.`).
+		WillReturnError(errors.New("connection refused"))
+
+	err := repo.SoftDelete(context.Background(), 1)
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, apperrors.ErrUserNotFound)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 // ─── UpdateIsActive ───────────────────────────────────────────────────────────
 
 func TestUpdateIsActive_Success(t *testing.T) {

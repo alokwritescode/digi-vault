@@ -50,6 +50,10 @@ func (m *MockUserRepository) UpdateIsActive(ctx context.Context, userID uint64, 
 	return m.Called(ctx, userID, isActive).Error(0)
 }
 
+func (m *MockUserRepository) SoftDelete(ctx context.Context, userID uint64) error {
+	return m.Called(ctx, userID).Error(0)
+}
+
 type MockTokenRepository struct{ mock.Mock }
 
 func (m *MockTokenRepository) Store(ctx context.Context, token *domain.RefreshToken) error {
