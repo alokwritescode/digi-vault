@@ -27,6 +27,7 @@ func newTestRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 	return client, mr
 }
 
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 func TestTokenStore_SetsRefreshKeyWithTTL(t *testing.T) {
@@ -166,4 +167,71 @@ func TestTokenDeleteAllForUser_NoTokens_NoError(t *testing.T) {
 	// user 999 has no tokens — should not error
 	err := repo.DeleteAllForUser(context.Background(), 999)
 	assert.NoError(t, err)
+}
+
+// ─── Error paths ─────────────────────────────────────────────────────────────
+
+func TestTokenStore_SetError_ReturnsWrappedError(t *testing.T) {
+	client, mr := newTestRedis(t)
+	repo := repository.NewTokenRepository(client)
+	mr.SetError("ERR internal error") // all commands return error immediately
+
+	token := &domain.RefreshToken{
+		JTI:       "err-set-jti",
+		UserID:    1,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	err := repo.Store(context.Background(), token)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "token store")
+}
+
+func TestTokenStore_SAddError_ReturnsWrappedError(t *testing.T) {
+	// Pre-set user_tokens:42 as a STRING key so SAdd returns WRONGTYPE error.
+	// Set succeeds (different key name), SAdd fails because the key type is wrong.
+	client, mr := newTestRedis(t)
+	repo := repository.NewTokenRepository(client)
+
+	require.NoError(t, mr.Set("user_tokens:42", "not-a-set"))
+
+	token := &domain.RefreshToken{
+		JTI:       "sadd-err-jti",
+		UserID:    42,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	err := repo.Store(context.Background(), token)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "token store user set")
+}
+
+func TestTokenFind_CorruptValue_ReturnsError(t *testing.T) {
+	client, mr := newTestRedis(t)
+	repo := repository.NewTokenRepository(client)
+
+	// Inject a non-numeric string so ParseUint fails
+	require.NoError(t, mr.Set("refresh:corrupt-jti", "not-a-number"))
+
+	_, err := repo.Find(context.Background(), "corrupt-jti")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "corrupt user id")
+}
+
+func TestTokenDelete_RedisError_ReturnsWrappedError(t *testing.T) {
+	client, mr := newTestRedis(t)
+	repo := repository.NewTokenRepository(client)
+	mr.SetError("ERR internal error")
+
+	err := repo.Delete(context.Background(), "any-jti")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "token delete")
+}
+
+func TestTokenDeleteAllForUser_SMembersError_ReturnsWrappedError(t *testing.T) {
+	client, mr := newTestRedis(t)
+	repo := repository.NewTokenRepository(client)
+	mr.SetError("ERR internal error")
+
+	err := repo.DeleteAllForUser(context.Background(), 77)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "token delete all")
 }
