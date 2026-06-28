@@ -28,11 +28,22 @@ func GenerateRefreshToken(userID uint64, secret string, expiry time.Duration) (s
 	return generate(userID, secret, expiry)
 }
 
+// GenerateTokenWithJTI generates a token with a caller-supplied JTI.
+// Use when access and refresh tokens in a pair must share the same JTI so that
+// Logout can delete the refresh token using only the access token's claims.
+func GenerateTokenWithJTI(jti string, userID uint64, secret string, expiry time.Duration) (string, error) {
+	return generateWithJTI(jti, userID, secret, expiry)
+}
+
 func generate(userID uint64, secret string, expiry time.Duration) (string, error) {
+	return generateWithJTI(uuid.NewString(), userID, secret, expiry)
+}
+
+func generateWithJTI(jti string, userID uint64, secret string, expiry time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID: userID,
-		JTI:    uuid.NewString(),
+		JTI:    jti,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
