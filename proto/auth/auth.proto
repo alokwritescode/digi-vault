@@ -1,0 +1,29 @@
+syntax = "proto3";
+package auth;
+option go_package = "github.com/alokwritescode/digi-vault/proto/auth";
+
+service AuthService {
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc GetUser(GetUserRequest)             returns (GetUserResponse);
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool   is_valid = 1;
+  uint64 user_id  = 2;
+  string jti      = 3;
+}
+
+message GetUserRequest {
+  uint64 user_id = 1;
+}
+
+message GetUserResponse {
+  uint64 user_id   = 1;
+  string phone     = 2;
+  string email     = 3;
+  bool   is_active = 4;
+}
